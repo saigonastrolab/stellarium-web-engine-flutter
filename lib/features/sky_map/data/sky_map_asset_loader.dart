@@ -59,7 +59,20 @@ class SkyMapAssetLoader {
   }
 
   static Future<bool> _skyDataReady(Directory root) async {
-    return File('${root.path}/stellarium/skydata/stars/properties').exists();
+    final requiredFiles = [
+      'stellarium/stellarium-web-engine.wasm',
+      'stellarium/skydata/stars/properties',
+      'stellarium/skydata/dso/properties',
+      'stellarium/skydata/skycultures/western/index.json',
+      'stellarium/skydata/landscapes/guereins/properties',
+    ];
+    for (final rel in requiredFiles) {
+      final f = File('${root.path}/$rel');
+      if (!await f.exists() || await f.length() == 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   static Future<void> _install(Directory root) async {

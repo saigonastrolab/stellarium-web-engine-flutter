@@ -110,7 +110,6 @@ class SkyMapCubit extends Cubit<SkyMapState> {
   }
 
   Future<void> onMapReady() async {
-    if (_bridgeReady) return;
     _bridgeReady = true;
     await _pushObserverToMap(state.utc);
     await _pushConfigToMap(state.config);

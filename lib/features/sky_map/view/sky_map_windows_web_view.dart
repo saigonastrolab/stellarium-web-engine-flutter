@@ -3,11 +3,27 @@ import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mlastro_skymap/features/sky_map/data/sky_map_asset_loader.dart';
 import 'package:mlastro_skymap/features/sky_map/data/sky_map_local_server.dart';
 import 'package:mlastro_skymap/features/sky_map/logic/sky_map_cubit.dart';
 import 'package:mlastro_skymap/utils/logger.dart';
 import 'package:webview_windows/webview_windows.dart';
+
+/// Chromium flags for WebView2 on Windows:
+/// - `--ignore-gpu-blocklist --enable-webgl`: ensure WebGL is not disabled on
+///   OEM hybrid-GPU (Intel/AMD iGPU + NVIDIA dGPU) laptop driver combinations.
+/// - `--disable-features=CalculateNativeWinOcclusion` & backgrounding flags:
+///   `webview_windows` parents its `ICoreWebView2CompositionController` to a
+///   0x0 `HWND_MESSAGE` window; without these flags, Chromium's occlusion
+///   tracker can mark the offscreen host as occluded and pause frame painting.
+const _kWebView2AdditionalArgs =
+    '--ignore-gpu-blocklist '
+    '--enable-webgl '
+    '--disable-features=CalculateNativeWinOcclusion '
+    '--disable-background-timer-throttling '
+    '--disable-renderer-backgrounding '
+    '--disable-backgrounding-occluded-windows';
 
 /// Windows desktop implementation of the Sky Map WebView host using Microsoft WebView2
 /// (texture-backed direct DirectX surface via `webview_windows`).
@@ -47,11 +63,16 @@ class _SkyMapWindowsWebViewState extends State<SkyMapWindowsWebView> {
   void _startReadyWatchdog(WebviewController controller) {
     _readyWatchdog?.cancel();
     _readyWatchdog = Timer(const Duration(seconds: 40), () async {
-      if (!mounted || widget.cubit.state.mapReady) return;
+      if (!mounted || widget.cubit.isClosed || widget.cubit.state.mapReady) {
+        return;
+      }
       try {
         final jsReady = await controller.executeScript(
           'window.MlastroSky && window.MlastroSky.isReady()',
         );
+        if (!mounted || widget.cubit.isClosed || widget.cubit.state.mapReady) {
+          return;
+        }
         xLog.e('SkyMap Windows: watchdog — map still not ready (js=$jsReady)');
         widget.cubit.onMapError(
           'Sky map loading timed out. Check %TEMP%\\mlastro_app.log for details.',
@@ -62,31 +83,68 @@ class _SkyMapWindowsWebViewState extends State<SkyMapWindowsWebView> {
     });
   }
 
-  Future<void> _initWebView() async {
+  static Future<void> _ensureEnvironmentInitialized() async {
     try {
-      xLog.d('SkyMap Windows: checking WebView2 runtime');
+      await WebviewController.initializeEnvironment(
+        additionalArguments: _kWebView2AdditionalArgs,
+      );
+      xLog.i('SkyMap Windows: WebView2 environment initialized with GPU/occlusion flags');
+    } on PlatformException catch (e) {
+      if (e.code != 'environment_already_initialized') {
+        xLog.w('SkyMap Windows: initializeEnvironment warning: $e');
+      }
+    } catch (e) {
+      xLog.w('SkyMap Windows: initializeEnvironment warning: $e');
+    }
+  }
+
+  Future<void> _initWebView() async {
+    WebviewController? controller;
+    try {
+      xLog.i('SkyMap Windows: checking WebView2 runtime');
       final version = await WebviewController.getWebViewVersion();
+      if (!mounted) return;
       if (version == null) {
         throw StateError(
           'Microsoft Edge WebView2 Runtime is not installed on this PC.\n'
           'Please install WebView2 Runtime to view the Sky Map.',
         );
       }
-      xLog.d('SkyMap Windows: WebView2 version: $version');
+      xLog.i('SkyMap Windows: WebView2 version: $version');
 
-      xLog.d('SkyMap Windows: ensuring assets installed');
       final root = await SkyMapAssetLoader.ensureInstalled();
+      if (!mounted) return;
       final baseUrl = await _server.start(root);
-      xLog.d('SkyMap Windows: local server at $baseUrl (root=$root)');
+      if (!mounted) {
+        await _server.stop();
+        return;
+      }
+      xLog.i('SkyMap Windows: local server at $baseUrl (root=$root)');
 
-      final controller = WebviewController();
+      await _ensureEnvironmentInitialized();
+      if (!mounted) {
+        await _server.stop();
+        return;
+      }
+
+      controller = WebviewController();
       await controller.initialize();
+      if (!mounted) {
+        unawaited(controller.dispose());
+        await _server.stop();
+        return;
+      }
       await controller.setBackgroundColor(const Color(0xFF060913));
+      if (!mounted) {
+        unawaited(controller.dispose());
+        await _server.stop();
+        return;
+      }
 
       _msgSub = controller.webMessage.listen(_onWebMessage);
       _loadingSub = controller.loadingState.listen((loadingState) {
         if (loadingState == LoadingState.navigationCompleted) {
-          xLog.d('SkyMap Windows: navigation completed');
+          xLog.i('SkyMap Windows: navigation completed');
         }
       });
 
@@ -95,19 +153,29 @@ class _SkyMapWindowsWebViewState extends State<SkyMapWindowsWebView> {
       );
       _startReadyWatchdog(controller);
 
-      // Mount controller into the widget tree immediately so surface size is
-      // reported to WebView2 before the web page starts loading scripts.
-      if (mounted) {
-        setState(() => _controller = controller);
-      }
+      // Mount controller into the widget tree and wait for its post-frame
+      // callback (`_reportSurfaceSize` -> `SetSurfaceSize` + `texture_bridge_->Start()`)
+      // to complete before loading the page so WebView2 bounds and frame capture
+      // are active when Stellarium initializes WebGL.
+      setState(() => _controller = controller);
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
 
+      if (!mounted) return;
       await controller.loadUrl('${baseUrl}index.html');
     } catch (e, st) {
       xLog.e('SkyMap Windows: WebView2 init failed: $e\n$st');
+      if (_controller == null &&
+          controller != null &&
+          controller.value.isInitialized) {
+        unawaited(controller.dispose());
+      }
       if (mounted) {
         setState(() => _loadError = e.toString());
+        if (!widget.cubit.isClosed) {
+          widget.cubit.onMapError('Sky map Windows init failed: $e');
+        }
       }
-      widget.cubit.onMapError('Sky map Windows init failed: $e');
     }
   }
 
@@ -136,7 +204,14 @@ class _SkyMapWindowsWebViewState extends State<SkyMapWindowsWebView> {
       switch (type) {
         case 'ready':
           _readyWatchdog?.cancel();
+          xLog.i('SkyMap JS (Win): ready');
           unawaited(widget.cubit.onMapReady());
+        case 'diag':
+          if (payload != null) {
+            xLog.i('SkyMap JS (Win) [diag]: $payload');
+          }
+        case 'reloading':
+          xLog.w('SkyMap JS (Win): reloading WebView ($payload)');
         case 'log':
           if (payload != null) {
             xLog.d('SkyMap JS (Win): $payload');

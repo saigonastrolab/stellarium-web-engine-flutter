@@ -34,6 +34,13 @@
     post('log', String(msg));
   }
 
+  /// Diagnostic lines are logged by the host at info level so they survive in
+  /// release builds (e.g. %TEMP%\mlastro_app.log on Windows).
+  function diag(msg) {
+    console.log('[SkyMap][diag]', msg);
+    post('diag', String(msg));
+  }
+
   function showError(msg) {
     var text = String(msg);
     console.error('[SkyMap]', text);
@@ -604,8 +611,8 @@
       var h = rect.height || window.innerHeight || 0;
       if (w > 8 && h > 8) {
         var dpr = window.devicePixelRatio || 1;
-        canvas.width = Math.floor(w * dpr);
-        canvas.height = Math.floor(h * dpr);
+        canvas.width = Math.round(w * dpr);
+        canvas.height = Math.round(h * dpr);
         cb({ width: w, height: h, dpr: dpr });
         return;
       }
@@ -1703,19 +1710,150 @@
     requestAnimationFrame(renderReticleLoop);
   }
 
+  function describeGl(gl, label) {
+    if (!gl) return label + '=none';
+    var vendor = '?';
+    var renderer = '?';
+    try {
+      var dbg = gl.getExtension('WEBGL_debug_renderer_info');
+      if (dbg) {
+        vendor = gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL);
+        renderer = gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL);
+      } else {
+        vendor = gl.getParameter(gl.VENDOR);
+        renderer = gl.getParameter(gl.RENDERER);
+      }
+    } catch (e) { /* ignore */ }
+    var maxTex = '?';
+    try { maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE); } catch (e) { /* ignore */ }
+    return label + ' vendor="' + vendor + '" renderer="' + renderer + '" maxTex=' + maxTex;
+  }
+
+  function releaseProbeContext(gl) {
+    try {
+      var lose = gl && gl.getExtension('WEBGL_lose_context');
+      if (lose) lose.loseContext();
+    } catch (e) { /* ignore */ }
+  }
+
   function probeWebGl() {
     try {
       var probe = document.createElement('canvas');
       var gl2 = probe.getContext('webgl2');
-      var gl1 = probe.getContext('webgl') || probe.getContext('experimental-webgl');
-      log('WebGL probe webgl2=' + !!gl2 + ' webgl=' + !!gl1);
-      if (gl2) return true;
-      if (gl1) return true;
-      return false;
+      var gl1 = gl2 ? null : (probe.getContext('webgl') || probe.getContext('experimental-webgl'));
+      diag('WebGL probe webgl2=' + !!gl2 + ' webgl=' + !!gl1 + ' | '
+        + describeGl(gl2 || gl1, gl2 ? 'webgl2' : 'webgl')
+        + ' | dpr=' + (window.devicePixelRatio || 1)
+        + ' ua="' + navigator.userAgent + '"');
+      var ok = !!(gl2 || gl1);
+      // Free the probe context so it does not count against the GPU context limit.
+      releaseProbeContext(gl2 || gl1);
+      return ok;
     } catch (e) {
-      log('WebGL probe failed: ' + e);
+      diag('WebGL probe failed: ' + e);
       return false;
     }
+  }
+
+  // -------------------------------------------------------------
+  // Render diagnostics & WebGL context-loss recovery
+  // -------------------------------------------------------------
+  var _renderFrames = 0;
+  var _contextLost = false;
+  var RELOAD_KEY = 'mlastroSkyCtxReloads';
+  var MAX_CTX_RELOADS = 2;
+
+  /// Wraps Module._core_render so we can count rendered frames passively without
+  /// touching WebGL state or stalling the GPU pipeline.
+  function installRenderProbe(engine) {
+    var orig = engine._core_render;
+    if (typeof orig !== 'function') return;
+    var wrapped = function (w, h, dpr) {
+      var result = orig(w, h, dpr);
+      // Emscripten's lazy export stub re-assigns Module._core_render on first call.
+      if (engine._core_render !== wrapped) {
+        orig = engine._core_render;
+        engine._core_render = wrapped;
+      }
+      _renderFrames++;
+      return result;
+    };
+    engine._core_render = wrapped;
+  }
+
+  function engineGl(engine) {
+    try {
+      if (engine.GL && engine.GL.currentContext && engine.GL.currentContext.GLctx) {
+        return engine.GL.currentContext.GLctx;
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  function sceneSummary() {
+    try {
+      var core = stel.core;
+      var obs = core.observer;
+      return 'lat=' + (obs.latitude * 180 / Math.PI).toFixed(2)
+        + ' lon=' + (obs.longitude * 180 / Math.PI).toFixed(2)
+        + ' utcMjd=' + (obs.utc || 0).toFixed(4)
+        + ' fov=' + (core.fov * 180 / Math.PI).toFixed(1)
+        + ' atm=' + !!(core.atmosphere && core.atmosphere.visible)
+        + ' land=' + !!(core.landscapes && core.landscapes.visible)
+        + ' stars=' + !!(core.stars && core.stars.visible)
+        + ' dsos=' + !!(core.dsos && core.dsos.visible);
+    } catch (e) {
+      return 'scene=? (' + e + ')';
+    }
+  }
+
+  function runRenderProbe(label) {
+    if (!stel) return;
+    var canvas = document.getElementById('stel-canvas');
+    var rect = canvas ? canvas.getBoundingClientRect() : { width: 0, height: 0 };
+    var framesAtStart = _renderFrames;
+    var t0 = performance.now();
+    setTimeout(function () {
+      var rendered = _renderFrames - framesAtStart;
+      var fps = (rendered * 1000 / (performance.now() - t0)).toFixed(1);
+      var gl = engineGl(stel);
+      var ctxLost = _contextLost || (gl ? gl.isContextLost() : true);
+      var bufSize = gl ? (gl.drawingBufferWidth + 'x' + gl.drawingBufferHeight) : 'nogl';
+      if (rendered > 0 && !ctxLost) {
+        try { sessionStorage.removeItem(RELOAD_KEY); } catch (e) { /* ignore */ }
+      }
+      diag('render probe [' + label + '] fps=' + fps
+        + ' totalFrames=' + _renderFrames
+        + ' canvas=' + (canvas ? canvas.width + 'x' + canvas.height : '?')
+        + ' buffer=' + bufSize
+        + ' css=' + Math.round(rect.width) + 'x' + Math.round(rect.height)
+        + ' dpr=' + (window.devicePixelRatio || 1)
+        + ' visibility=' + document.visibilityState
+        + ' ctxLost=' + ctxLost
+        + ' | ' + sceneSummary());
+    }, 2000);
+  }
+
+  function installContextLossHandlers(canvas) {
+    canvas.addEventListener('webglcontextlost', function (e) {
+      _contextLost = true;
+      if (e && e.preventDefault) e.preventDefault();
+      var count = 0;
+      try { count = parseInt(sessionStorage.getItem(RELOAD_KEY) || '0', 10) || 0; } catch (err) { /* ignore */ }
+      diag('WebGL context LOST (reloads so far=' + count + ')');
+      if (count >= MAX_CTX_RELOADS) {
+        showError('The graphics driver reset the sky map (WebGL context lost). '
+          + 'Reopen the sky map or update your graphics driver.');
+        return;
+      }
+      try { sessionStorage.setItem(RELOAD_KEY, String(count + 1)); } catch (err) { /* ignore */ }
+      // Stellarium Web Engine cannot rebuild its GL resources; reload the page.
+      post('reloading', { reason: 'webglcontextlost' });
+      setTimeout(function () { window.location.reload(); }, 800);
+    }, false);
+    canvas.addEventListener('webglcontextrestored', function () {
+      diag('WebGL context restored');
+    }, false);
   }
 
   function bootEngine(canvas, baseUrl, wasmUrl, skyDataUrl) {
@@ -1724,6 +1862,8 @@
       showError('WebGL is not available in this WebView.');
       return;
     }
+
+    installContextLossHandlers(canvas);
 
     window.__mlastroSweInitFailed = function (e) {
       showError('SWE init failed: ' + (e && e.stack ? e.stack : e));
@@ -1740,6 +1880,7 @@
         try {
           log('onReady');
           stel = engine;
+          installRenderProbe(engine);
           var core = stel.core;
           setDefaultObserver(stel);
           loadDataSources(core, skyDataUrl);
@@ -1763,6 +1904,7 @@
           applyPendingObserver();
           post('ready', {});
           log('ready');
+          runRenderProbe('after-ready');
         } catch (e) {
           showError('onReady failed: ' + e);
         }
@@ -1947,13 +2089,13 @@
       var h = rect.height || window.innerHeight || 0;
       if (w <= 0 || h <= 0) return;
       var dpr = window.devicePixelRatio || 1;
-      var targetW = Math.floor(w * dpr);
-      var targetH = Math.floor(h * dpr);
+      var targetW = Math.round(w * dpr);
+      var targetH = Math.round(h * dpr);
       if (canvas.width !== targetW || canvas.height !== targetH) {
         canvas.width = targetW;
         canvas.height = targetH;
       }
-      if (reticleCanvas) {
+      if (reticleCanvas && (reticleCanvas.width !== targetW || reticleCanvas.height !== targetH)) {
         reticleCanvas.width = targetW;
         reticleCanvas.height = targetH;
       }

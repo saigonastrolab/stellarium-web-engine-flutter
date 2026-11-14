@@ -86,6 +86,10 @@ replacements = [
         'var onWheelEvent=function(e){e.preventDefault();fixPageXY(e);var pos=getMousePos(e);var zoom_factor=1.05;var delta=getMouseWheelDelta(e)*2;Module._core_on_zoom(Math.pow(zoom_factor,delta),pos.x,pos.y);return false};',
         'var onWheelEvent=function(e){e.preventDefault();var rect=canvas.getBoundingClientRect();var cx=rect.width/2;var cy=rect.height/2;var zoom_factor=1.05;var delta=getMouseWheelDelta(e)*2;Module._core_on_zoom(Math.pow(zoom_factor,delta),cx,cy);return false};',
     ),
+    (
+        'var displayWidth=rect.width;var displayHeight=rect.height;var sizeChanged=canvas.width!==displayWidth||canvas.height!==displayHeight;if(sizeChanged){canvas.width=displayWidth*dpr;canvas.height=displayHeight*dpr}Module._core_update();Module._core_render(displayWidth,displayHeight,dpr);',
+        'var displayWidth=rect.width;var displayHeight=rect.height;var targetW=Math.round(displayWidth*dpr);var targetH=Math.round(displayHeight*dpr);if(targetW>0&&targetH>0){if(canvas.width!==targetW||canvas.height!==targetH){canvas.width=targetW;canvas.height=targetH}Module._core_update();Module._core_render(displayWidth,displayHeight,dpr)}',
+    ),
 ]
 
 for old, new in replacements:

@@ -156,6 +156,12 @@ class _SkyMapFlutterWebViewState extends State<_SkyMapFlutterWebView> {
         case 'ready':
           _readyWatchdog?.cancel();
           unawaited(widget.cubit.onMapReady());
+        case 'diag':
+          if (payload != null) {
+            xLog.i('SkyMap JS [diag]: $payload');
+          }
+        case 'reloading':
+          xLog.w('SkyMap JS: reloading WebView ($payload)');
         case 'log':
           if (payload != null) {
             xLog.d('SkyMap JS: $payload');
