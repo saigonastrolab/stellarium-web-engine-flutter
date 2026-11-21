@@ -474,15 +474,6 @@
         setNightMode(!!config.nightMode);
       }
 
-      if (config.limitZoom !== undefined) {
-        LIMIT_ZOOM = !!config.limitZoom;
-      }
-      if (config.minFov !== undefined && typeof config.minFov === 'number' && !isNaN(config.minFov)) {
-        MIN_FOV_DEG = config.minFov;
-      }
-      if (config.maxFov !== undefined && typeof config.maxFov === 'number' && !isNaN(config.maxFov)) {
-        MAX_FOV_DEG = config.maxFov;
-      }
       if (config.defaultFov !== undefined && typeof config.defaultFov === 'number' && !isNaN(config.defaultFov)) {
         DEFAULT_FOV_DEG = config.defaultFov;
       }
@@ -492,37 +483,22 @@
     }
   }
 
-  // FOV limits (degrees). Larger FOV = zoomed out (wider sky).
-  var MIN_FOV_DEG = 6;
-  var MAX_FOV_DEG = 85;
+  // FOV limits (degrees). Larger FOV = zoomed out (wider sky). Always unlimited zoom.
+  var MIN_FOV_DEG = 0.0002;
+  var MAX_FOV_DEG = 180;
   var DEFAULT_FOV_DEG = 75;
-  var LIMIT_ZOOM = true;
 
   function clampFov(core, engine) {
     if (!core || !engine) return false;
-    if (!LIMIT_ZOOM) {
-      var minSafety = 0.0002 * engine.D2R;
-      var maxSafety = 180 * engine.D2R;
-      var fov = core.fov;
-      if (fov < minSafety) {
-        core.fov = minSafety;
-        return true;
-      }
-      if (fov > maxSafety) {
-        core.fov = maxSafety;
-        return true;
-      }
-      return false;
-    }
-    var min = MIN_FOV_DEG * engine.D2R;
-    var max = MAX_FOV_DEG * engine.D2R;
+    var minSafety = MIN_FOV_DEG * engine.D2R;
+    var maxSafety = MAX_FOV_DEG * engine.D2R;
     var fov = core.fov;
-    if (fov < min) {
-      core.fov = min;
+    if (fov < minSafety) {
+      core.fov = minSafety;
       return true;
     }
-    if (fov > max) {
-      core.fov = max;
+    if (fov > maxSafety) {
+      core.fov = maxSafety;
       return true;
     }
     return false;
@@ -2240,9 +2216,8 @@
       var obsVector = stel.s2c(azRad, altRad);
       stel.lookAt(obsVector, 0.6);
 
-      // Auto zoom out to maximum FOV (85° in limited mode, 120° in unlimited mode)
-      var maxOutFov = LIMIT_ZOOM ? MAX_FOV_DEG : 200;
-      stel.zoomTo(maxOutFov * stel.D2R, 0.6);
+      // Auto zoom out to maximum FOV (unlimited mode)
+      stel.zoomTo(200 * stel.D2R, 0.6);
 
       post('user_pan', {});
     } catch (e) {
@@ -2456,12 +2431,7 @@
     setFov: function (fovDeg) {
       if (!ready || !stel) return;
       try {
-        var clamped;
-        if (LIMIT_ZOOM) {
-          clamped = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, fovDeg));
-        } else {
-          clamped = Math.max(0.0002, Math.min(180, fovDeg));
-        }
+        var clamped = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, fovDeg));
         stel.zoomTo(clamped * stel.D2R, 0.3);
       } catch (e) {
         log('setFov: ' + e);
@@ -2473,17 +2443,13 @@
       try {
         var curFovDeg = stel.core.fov / stel.D2R;
         var target;
-        if (LIMIT_ZOOM) {
-          target = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, curFovDeg + deltaDeg));
+        if (curFovDeg < 10) {
+          var step = deltaDeg < 0 ? curFovDeg * 0.4 : Math.max(0.2, curFovDeg * 1.5 - curFovDeg);
+          target = deltaDeg < 0 ? curFovDeg - step : curFovDeg + step;
         } else {
-          if (curFovDeg < 10) {
-            var step = deltaDeg < 0 ? curFovDeg * 0.4 : Math.max(0.2, curFovDeg * 1.5 - curFovDeg);
-            target = deltaDeg < 0 ? curFovDeg - step : curFovDeg + step;
-          } else {
-            target = curFovDeg + deltaDeg;
-          }
-          target = Math.max(0.0002, Math.min(180, target));
+          target = curFovDeg + deltaDeg;
         }
+        target = Math.max(MIN_FOV_DEG, Math.min(MAX_FOV_DEG, target));
         stel.zoomTo(target * stel.D2R, 0.25);
       } catch (e) {
         log('zoomBy: ' + e);

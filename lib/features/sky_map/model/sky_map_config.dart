@@ -18,9 +18,6 @@ class SkyMapConfig extends Equatable {
     this.showDsos = true,
     this.showPlanets = true,
     this.nightMode = false,
-    this.limitZoom = true,
-    this.minFov = 6.0,
-    this.maxFov = 85.0,
     this.defaultFov = 75.0,
   });
 
@@ -115,9 +112,6 @@ class SkyMapConfig extends Equatable {
   final bool showDsos;
   final bool showPlanets;
   final bool nightMode;
-  final bool limitZoom;
-  final double minFov;
-  final double maxFov;
   final double defaultFov;
 
   SkyMapConfig copyWith({
@@ -136,9 +130,6 @@ class SkyMapConfig extends Equatable {
     bool? showDsos,
     bool? showPlanets,
     bool? nightMode,
-    bool? limitZoom,
-    double? minFov,
-    double? maxFov,
     double? defaultFov,
   }) {
     return SkyMapConfig(
@@ -160,9 +151,6 @@ class SkyMapConfig extends Equatable {
       showDsos: showDsos ?? this.showDsos,
       showPlanets: showPlanets ?? this.showPlanets,
       nightMode: nightMode ?? this.nightMode,
-      limitZoom: limitZoom ?? this.limitZoom,
-      minFov: minFov ?? this.minFov,
-      maxFov: maxFov ?? this.maxFov,
       defaultFov: defaultFov ?? this.defaultFov,
     );
   }
@@ -183,9 +171,6 @@ class SkyMapConfig extends Equatable {
         'showDsos': showDsos,
         'showPlanets': showPlanets,
         'nightMode': nightMode,
-        'limitZoom': limitZoom,
-        'minFov': minFov,
-        'maxFov': maxFov,
         'defaultFov': defaultFov,
       };
 
@@ -207,9 +192,6 @@ class SkyMapConfig extends Equatable {
       showDsos: json['showDsos'] as bool? ?? true,
       showPlanets: json['showPlanets'] as bool? ?? true,
       nightMode: json['nightMode'] as bool? ?? false,
-      limitZoom: json['limitZoom'] as bool? ?? false,
-      minFov: (json['minFov'] as num?)?.toDouble() ?? 6.0,
-      maxFov: (json['maxFov'] as num?)?.toDouble() ?? 85.0,
       defaultFov: (json['defaultFov'] as num?)?.toDouble() ?? 75.0,
     );
   }
@@ -231,9 +213,6 @@ class SkyMapConfig extends Equatable {
         showDsos,
         showPlanets,
         nightMode,
-        limitZoom,
-        minFov,
-        maxFov,
         defaultFov,
       ];
 }
