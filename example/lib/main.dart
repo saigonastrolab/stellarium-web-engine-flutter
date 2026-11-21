@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'pages/embedded_map_page.dart';
 import 'pages/observatory_page.dart';
 import 'pages/telescope_dashboard_page.dart';

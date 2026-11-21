@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mlastro_skymap/features/sky_map/data/sky_map_asset_loader.dart';
 import 'package:mlastro_skymap/features/sky_map/data/sky_map_local_server.dart';

@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Full-screen cosmic loading overlay with an astronomy-themed animated reticle
 /// and orbiting planet, eliminating startup flashes and providing smooth fade-out.

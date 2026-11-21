@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:mlastro_skymap/mlastro_skymap.dart';
 
 class EmbeddedMapPage extends StatefulWidget {

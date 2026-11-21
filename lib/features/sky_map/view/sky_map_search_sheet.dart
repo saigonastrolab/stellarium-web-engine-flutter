@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:mlastro_skymap/astro/coordinate_format.dart';
 import 'package:mlastro_skymap/features/sky_map/logic/sky_map_cubit.dart';

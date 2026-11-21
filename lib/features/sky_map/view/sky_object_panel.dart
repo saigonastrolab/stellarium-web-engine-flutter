@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:mlastro_skymap/astro/coordinate_format.dart';
 import 'package:mlastro_skymap/features/sky_map/model/sky_object.dart';

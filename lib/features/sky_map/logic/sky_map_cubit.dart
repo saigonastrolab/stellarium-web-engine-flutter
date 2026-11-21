@@ -23,14 +23,13 @@ class SkyMapCubit extends Cubit<SkyMapState> {
   SkyMapCubit({
     LocationService? location,
     SkyMapOrientationService? orientationService,
-    Stream<SkyMapTelescopePosition?>? telescopePositionStream,
+    this._telescopePositionStream,
     SkyMapTelescopePosition? initialTelescopePosition,
     SkyMapConfig? initialConfig,
     double? initialLat,
     double? initialLonEast,
   })  : _location = location ?? LocationService(),
         _orientationService = orientationService ?? SkyMapOrientationService(),
-        _telescopePositionStream = telescopePositionStream,
         super(
           SkyMapState.initial(
             initialLat: initialLat,
